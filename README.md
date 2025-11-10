@@ -49,18 +49,20 @@ Salin kode
 
 git clone https://github.com/AyyMhmd/TrashClassifier.git
 cd TrashClassifier
+
 2️⃣ Pastikan .NET SDK 8 sudah terinstall
 Cek versi:
-
-
 dotnet --version
+
 3️⃣ Restore & build
 
 dotnet restore
 dotnet build
+
 4️⃣ Jalankan program
 
 dotnet run
+
 Jika dataset sudah sesuai, program akan:
 
 Membuat file CSV label dataset
