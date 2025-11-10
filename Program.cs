@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 
 public class ImageData
 {
@@ -47,17 +48,15 @@ class Program
         var split = mlContext.Data.TrainTestSplit(imageData, testFraction: 0.2);
         Console.WriteLine("📊 Data dibagi: 80% latih, 20% uji");
 
-        // --- Use LoadRawImageBytes for ImagePixels (VarVector<Byte>)
-        // --- Map the string label to a key column ("LabelKey") expected by the trainer
+        
         var preprocessing = mlContext.Transforms
             .LoadRawImageBytes(outputColumnName: "ImagePixels", imageFolder: DataSetFolder, inputColumnName: nameof(ImageData.ImagePath))
             .Append(mlContext.Transforms.Conversion.MapValueToKey(outputColumnName: "LabelKey", inputColumnName: nameof(ImageData.Label)));
 
-        // Trainer options
         var options = new ImageClassificationTrainer.Options
         {
             FeatureColumnName = "ImagePixels",
-            LabelColumnName = "LabelKey", // use the key column produced above
+            LabelColumnName = "LabelKey", 
             Epoch = 50,
             BatchSize = 32,
             MetricsCallback = metrics =>
@@ -81,12 +80,26 @@ class Program
 
         var trainer = mlContext.MulticlassClassification.Trainers.ImageClassification(options);
 
-        // Append MapKeyToValue to convert predicted key back to original string
         var pipeline = preprocessing
             .Append(trainer)
             .Append(mlContext.Transforms.Conversion.MapKeyToValue(outputColumnName: "PredictedLabel", inputColumnName: "PredictedLabel"));
 
         Console.WriteLine("\n🚀 Memulai pelatihan model...\n");
+
+        try
+        {
+            EnsureResnetMetaFile();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("❌ Gagal menyiapkan file TensorFlow yang diperlukan:");
+            Console.WriteLine(ex.Message);
+            Console.WriteLine("\nSilakan salin file 'resnet_v2_50_299.meta' ke folder berikut:");
+            Console.WriteLine($"   {Path.Combine(Path.GetTempPath(), "MLNET")}");
+            Console.WriteLine("Atau periksa koneksi internet Anda lalu jalankan ulang program.");
+            return;
+        }
+
         var model = pipeline.Fit(split.TrainSet);
         Console.WriteLine("\n✅ Pelatihan selesai!");
 
@@ -153,8 +166,7 @@ class Program
 
         var relativePath = Path.GetRelativePath(DataSetFolder, imagePath).Replace("\\", "/");
 
-        // MapValueToKey is part of the pipeline, so the prediction input must include a label value
-        // that exists in the training label vocabulary. Provide a safe default (first valid label).
+       
         var input = new ImageData { ImagePath = relativePath, Label = ValidLabels[0] };
 
         var prediction = predictionEngine.Predict(input);
@@ -172,5 +184,36 @@ class Program
         {
             Console.WriteLine($"     - {item.Label}: {item.Score:P2}");
         }
+    }
+
+    
+    static void EnsureResnetMetaFile()
+    {
+        var url = "https://aka.ms/mlnet-resources/meta/resnet_v2_50_299.meta";
+        var dir = Path.Combine(Path.GetTempPath(), "MLNET");
+        Directory.CreateDirectory(dir);
+        var filePath = Path.Combine(dir, "resnet_v2_50_299.meta");
+
+        if (File.Exists(filePath))
+        {
+            Console.WriteLine($"ℹ️ Meta file sudah ada: {filePath}");
+            return;
+        }
+
+        Console.WriteLine("🔄 Meta file TensorFlow tidak ditemukan. Mencoba mengunduh...");
+
+        using var http = new HttpClient() { Timeout = TimeSpan.FromMinutes(2) };
+
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; MLNETDownloader/1.0)");
+
+        var resp = http.GetAsync(url).GetAwaiter().GetResult();
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new Exception($"Gagal mengunduh meta file. Status code: {resp.StatusCode}");
+        }
+
+        var bytes = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+        File.WriteAllBytes(filePath, bytes);
+        Console.WriteLine($"✅ Meta file berhasil diunduh ke: {filePath}");
     }
 }
